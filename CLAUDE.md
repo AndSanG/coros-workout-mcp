@@ -12,11 +12,14 @@ MCP server that lets Claude design strength workouts and push them to a COROS wa
 npm install && npm run build   # TypeScript → dist/
 npm test                       # vitest (unit tests only, no API calls)
 npm run test:watch             # vitest watch mode
+npm run test:integration       # on-demand LIVE round trip vs real COROS API (needs creds)
 ```
 
 Build output goes to `dist/` via `tsc`. The server entry point is `dist/src/index.ts` (compiled to `dist/src/index.js`).
 
 To run a single test file: `npx vitest run src/__tests__/exercise-catalog.test.ts`
+
+`test:integration` runs the live `*.integration.ts` suites via `vitest.integration.config.ts` (excluded from `npm test`; skips unless `COROS_TOKEN` + `COROS_USERID` (+ `COROS_REGION`, default `us`) are set). Two targets: `coros-api.integration.ts` (strength + run + update_exercises round trips against the API) and `mcp-stdio.integration.ts` (spawns the compiled server and drives it over the real STDIO/JSON-RPC transport — **run `npm run build` first**). Auth is injected via the `COROS_TOKEN`/`COROS_USERID` env path in `getValidAuth` (no login, no `auth.json` write, web session preserved). Get the token from DevTools → Network → any `teamapi.coros.com` request → `accesstoken` header.
 
 ## Architecture
 

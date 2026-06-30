@@ -14,6 +14,8 @@ import {
   calculateRunWorkout,
   addRunWorkout,
   queryWorkouts,
+  deleteWorkout,
+  formatWorkoutSummary,
   queryExerciseCatalog,
   fetchI18nStrings,
   buildCatalogFromRaw,
@@ -103,7 +105,7 @@ server.tool(
       content: [
         {
           type: "text" as const,
-          text: "Not authenticated. Use authenticate_coros tool or set COROS_EMAIL/COROS_PASSWORD env vars.",
+          text: "Not authenticated. Use authenticate_coros tool, set COROS_TOKEN/COROS_USERID (browser token), or set COROS_EMAIL/COROS_PASSWORD env vars.",
         },
       ],
     };
@@ -495,7 +497,7 @@ server.tool(
         name,
         sportType,
         limitSize: limit,
-      })) as { data: Array<{ name: string; overview: string; sportType: number; duration: number; totalSets: number; exerciseNum: number; estimatedTime: number }> };
+      })) as { data: Array<{ id: string; name: string; overview: string; sportType: number; duration: number; totalSets: number; exerciseNum: number; estimatedTime: number }> };
 
       const workouts = result.data || [];
       if (workouts.length === 0) {
@@ -509,12 +511,7 @@ server.tool(
         };
       }
 
-      const formatted = workouts
-        .map((w) => {
-          const durationMin = Math.round((w.estimatedTime || w.duration || 0) / 60);
-          return `- **${w.name}** (${durationMin} min, ${w.totalSets || 0} sets, ${w.exerciseNum || 0} exercises)${w.overview ? `\n  ${w.overview}` : ""}`;
-        })
-        .join("\n");
+      const formatted = workouts.map(formatWorkoutSummary).join("\n");
 
       return {
         content: [
@@ -530,6 +527,52 @@ server.tool(
           {
             type: "text" as const,
             text: `Failed to list workouts: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// --- Tool: delete_workout ---
+server.tool(
+  "delete_workout",
+  "Permanently delete a workout from COROS Training Hub by ID. This is DESTRUCTIVE and IRREVERSIBLE — there is no undo. Before calling, you MUST confirm with the user which workout to delete (show its name and id from list_workouts) and get explicit approval. Never call this speculatively or to clean up after yourself.",
+  {
+    id: z.string().describe("Workout ID to delete (from list_workouts output)"),
+  },
+  async ({ id }) => {
+    try {
+      const auth = await getValidAuth();
+      if (!auth) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Not authenticated. Use authenticate_coros first.",
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      await deleteWorkout(auth, id);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Deleted workout ${id}.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Failed to delete workout: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
         isError: true,

@@ -75,16 +75,25 @@ export async function login(
   return auth;
 }
 
-/** Get valid auth from stored file or env vars */
+/** Get valid auth from a direct token, the stored file, or an email/password login. */
 export async function getValidAuth(): Promise<AuthData | null> {
-  // Try stored auth first
+  const region = (process.env.COROS_REGION as Region) || "eu";
+
+  // 1. Explicit token override (e.g. extracted from the browser). Does not touch
+  //    the stored file and does not log in, so it never invalidates the web session.
+  const token = process.env.COROS_TOKEN;
+  const userId = process.env.COROS_USERID;
+  if (token && userId) {
+    return { accessToken: token, userId, region, timestamp: Date.now() };
+  }
+
+  // 2. Stored auth file.
   const stored = loadAuth();
   if (stored) return stored;
 
-  // Try env vars
+  // 3. Email/password login (WARNING: invalidates any active web session).
   const email = process.env.COROS_EMAIL;
   const password = process.env.COROS_PASSWORD;
-  const region = (process.env.COROS_REGION as Region) || "eu";
   if (email && password) {
     return login(email, password, region);
   }
@@ -456,13 +465,15 @@ export async function calculateWorkout(
   exercisePayloads: ExercisePayload[]
 ): Promise<CalculateResult> {
   const payload = buildWorkoutPayload(name, overview, exercisePayloads);
+  // The /calculate response uses plan*-prefixed keys (planDuration, planSets,
+  // planTrainingLoad) for both strength and run — confirmed against the live API.
   const result = (await apiPost(auth, "/training/program/calculate", payload)) as {
-    data: { duration: number; totalSets: number; trainingLoad: number };
+    data: { planDuration: number; planSets: number; planTrainingLoad: number };
   };
   return {
-    duration: result.data.duration,
-    totalSets: result.data.totalSets,
-    trainingLoad: result.data.trainingLoad,
+    duration: result.data.planDuration,
+    totalSets: result.data.planSets,
+    trainingLoad: result.data.planTrainingLoad,
   };
 }
 
@@ -828,4 +839,25 @@ export async function queryWorkouts(
     sportType: options.sportType ?? 0,
   };
   return apiPost(auth, "/training/program/query", body);
+}
+
+export async function deleteWorkout(auth: AuthData, id: string): Promise<void> {
+  // Endpoint expects an array of program ids, even for a single delete.
+  await apiPost(auth, "/training/program/delete", [id]);
+}
+
+export interface WorkoutSummary {
+  id: string;
+  name: string;
+  overview?: string;
+  duration?: number;
+  estimatedTime?: number;
+  totalSets?: number;
+  exerciseNum?: number;
+}
+
+/** Format a single workout for the `list_workouts` tool output. */
+export function formatWorkoutSummary(w: WorkoutSummary): string {
+  const durationMin = Math.round((w.estimatedTime || w.duration || 0) / 60);
+  return `- **${w.name}** \`[id: ${w.id}]\` (${durationMin} min, ${w.totalSets || 0} sets, ${w.exerciseNum || 0} exercises)${w.overview ? `\n  ${w.overview}` : ""}`;
 }

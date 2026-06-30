@@ -2,6 +2,19 @@
 
 Project status and pending tasks. Last updated: 2026-06-30.
 
+## Bug fixes
+
+### `calculateWorkout` read the wrong response keys (strength path) — ✅ FIXED
+Found via a **live end-to-end test** (Chrome DevTools → captured a real browser token →
+ran the full `list → create → verify → delete` round trip against `teamapi.coros.com`).
+The strength `/calculate` response uses **`plan*`-prefixed keys** (`planDuration`, `planSets`,
+`planTrainingLoad`) — same as the run path — but `calculateWorkout` was reading
+`duration`/`totalSets`/`trainingLoad`, which don't exist. Result: `create_workout` reported
+`Duration: ~NaN min | Sets: undefined | Training load: undefined` on every successful
+strength workout (the workout itself saved fine — the server recomputes). Fixed in
+`src/coros-api.ts`; added an offline regression test (`describe("calculateWorkout")`) that
+stubs the `plan*` response shape.
+
 ## Current state — what is implemented
 
 ### Available MCP tools
@@ -27,9 +40,16 @@ Fully documented in `research/RUN-WORKOUT-HR-ANALYSIS.md`. Confirmed working:
 
 ## Pending tasks
 
-### 1. Tool: `set_token` (HIGH PRIORITY)
+### 1. Tool: `set_token` (HIGH PRIORITY — partially done)
 
 **Problem:** `authenticate_coros` logs in via the API, which **invalidates the user's browser session**. The user must choose between using the web app OR the MCP.
+
+**✅ Env-var half now implemented:** `getValidAuth()` now honors `COROS_TOKEN` + `COROS_USERID`
+(+ `COROS_REGION`) as an explicit-token override — it builds `AuthData` directly, no login,
+no file write, so the web session is never invalidated. (Previously the backlog claimed this
+worked, but `getValidAuth` only supported `auth.json` + `COROS_EMAIL`/`COROS_PASSWORD`.)
+**Still TODO:** the `set_token` *tool* itself (persists the token to `auth.json` so it
+survives without keeping env vars around).
 
 **Solution:** Add a tool that accepts a token extracted directly from browser request headers, without doing a login call.
 
@@ -56,26 +76,17 @@ Fully documented in `research/RUN-WORKOUT-HR-ANALYSIS.md`. Confirmed working:
 
 ---
 
-### 2. Tool: `delete_workout` (MEDIUM PRIORITY)
+### 2. Tool: `delete_workout` — ✅ DONE
 
-**Captured endpoint:** `POST /training/program/delete` with body `["<programId>"]`. Response: `{"result":"0000","message":"OK"}`.
+`POST /training/program/delete` with body `["<programId>"]`.
 
-**Implementation:**
-1. In `src/coros-api.ts`, add:
-   ```typescript
-   export async function deleteWorkout(auth: AuthData, id: string): Promise<void> {
-     await apiPost(auth, "/training/program/delete", [id]);
-   }
-   ```
-2. In `src/index.ts`, register:
-   ```typescript
-   server.tool("delete_workout",
-     "Delete a workout from COROS Training Hub by ID.",
-     { id: z.string().describe("Workout ID (from list_workouts)") },
-     async ({ id }) => { /* auth check + deleteWorkout(auth, id) */ }
-   )
-   ```
-3. Update `list_workouts` to include the `id` field in its output (currently not shown — see task 6).
+- `src/coros-api.ts` — added `deleteWorkout(auth, id)`.
+- `src/index.ts` — registered the tool. Its **description explicitly states the action is
+  destructive/irreversible and instructs the agent to confirm the workout (name + id) with
+  the user and get approval before calling** — never speculatively.
+- Depends on task 6 (the `id` shown by `list_workouts` is the argument).
+- Tested: `deleteWorkout` has unit tests (fetch stubbed via `vi.stubGlobal`) asserting the
+  body is `[id]` (array, not bare id) and that a non-`0000` API result throws.
 
 ---
 
@@ -121,17 +132,16 @@ Add a section for `create_run_workout` with the full schema and an example call,
 
 ---
 
-### 6. Show `id` in `list_workouts` output (LOW PRIORITY)
+### 6. Show `id` in `list_workouts` output — ✅ DONE
 
-`list_workouts` currently does not include the workout `id` in its output. This is needed to pass to `delete_workout`.
+Added `id: string` to the inline response type and surfaced it in the formatted line as
+`` `[id: <id>]` `` so users can pass it to `delete_workout`. The program-level `id` is a
+string (confirmed in `research/create-workout-request-all.txt`: `"id":"0"`).
 
-**Change in `src/index.ts`** — update the workout formatting map:
-```typescript
-.map((w) => {
-  const durationMin = Math.round((w.estimatedTime || w.duration || 0) / 60);
-  return `- **${w.name}** [id: ${w.id}] (${durationMin} min, ${w.totalSets || 0} sets)`;
-})
-```
+The formatting was extracted into an exported pure helper `formatWorkoutSummary(w)` in
+`src/coros-api.ts` (index.ts can't be imported in a test — it starts the server on import).
+Tested: id/name/duration shown, `estimatedTime`→`duration` fallback, overview on its own
+line, and zero-defaults for missing counts.
 
 ---
 
@@ -147,9 +157,34 @@ Add a section for `create_run_workout` with the full schema and an example call,
 
 ### Commands
 ```bash
-npm run build   # compile TypeScript → dist/
-npm test        # vitest (35 tests currently)
+npm run build          # compile TypeScript → dist/
+npm test               # vitest unit tests, offline (41 tests currently)
+npm run test:integration   # on-demand LIVE round trip against the real COROS API
 ```
+
+### Live integration tests (on demand)
+14 live tests across two files (separate `vitest.integration.config.ts`, matches
+`*.integration.ts`; excluded from `npm test`; skip cleanly when creds are absent):
+
+- **`src/__tests__/coros-api.integration.ts`** (10) — calls the `coros-api` functions
+  directly. Strength `list → create → verify → delete → gone`; run path (warmup + repeat×3
+  HR-zone distance intervals + cooldown — the fragile encoding); and `update_exercises`
+  (live catalog API + i18n CDN + in-memory rebuild, read-only — does NOT write
+  `data/exercises.json`). Each create asserts the `plan*` metrics are real (non-NaN).
+- **`src/__tests__/mcp-stdio.integration.ts`** (4) — TRUE end-to-end: spawns the compiled
+  server (`dist/src/index.js`) and drives it over the real STDIO/JSON-RPC transport like a
+  client would, so it covers `src/index.ts` tool registrations + transport + live API.
+  Lists tools, checks auth, then `create_workout → list_workouts → delete_workout`.
+  **Requires `npm run build` first** (spawns the compiled server).
+
+Auth is injected via `COROS_TOKEN`/`COROS_USERID` (getValidAuth's explicit-token path) —
+no `auth.json` touched, no login, web session stays valid. To run:
+```bash
+COROS_TOKEN=<accesstoken> COROS_USERID=<userId> COROS_REGION=us npm run test:integration
+```
+Get the token from DevTools → Network → any `teamapi.coros.com` request → `accesstoken`
+header (does not invalidate the web session). Creates a clearly-labeled throwaway workout
+and deletes it, with an `afterAll` safety-net cleanup.
 
 ### Auth for manual testing
 The user's account is US region (`teamapi.coros.com`). To test without invalidating the browser session: extract the `accesstoken` header and `userId` from any `teamapi.coros.com` request in DevTools, then use the `set_token` tool (task 1) or pass them as env vars `COROS_TOKEN` + `COROS_USERID` + `COROS_REGION=us`.

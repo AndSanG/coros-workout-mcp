@@ -1,11 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   buildExercisePayload,
   buildWorkoutPayload,
   resolveExercises,
   resolveRunSteps,
+  calculateWorkout,
+  deleteWorkout,
+  formatWorkoutSummary,
 } from "../coros-api.js";
 import { findByName } from "../exercise-catalog.js";
+import type { AuthData } from "../types.js";
 
 describe("coros-api payload construction", () => {
   describe("buildExercisePayload", () => {
@@ -258,5 +262,112 @@ describe("resolveRunSteps", () => {
       { type: "rest", targetType: "hrRecovery" },
     ]);
     expect(steps[0].targetValue).toBe(120);
+  });
+});
+
+describe("calculateWorkout", () => {
+  const auth: AuthData = {
+    accessToken: "tok",
+    userId: "user1",
+    region: "us",
+    timestamp: 0,
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("maps the plan* response keys (the live /calculate shape) to the result", async () => {
+    // Live API returns planDuration/planSets/planTrainingLoad, NOT
+    // duration/totalSets/trainingLoad. Reading the wrong keys yields NaN/undefined
+    // in the create_workout output — guard against that regression here.
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({
+        result: "0000",
+        data: { planDuration: 504, planSets: 6, planTrainingLoad: 42 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ex = resolveExercises([{ name: "Push-ups", sets: 3, reps: 12 }]);
+    const calc = await calculateWorkout(auth, "T", "", ex);
+
+    expect(calc.duration).toBe(504);
+    expect(calc.totalSets).toBe(6);
+    expect(calc.trainingLoad).toBe(42);
+    expect(Number.isNaN(Math.round(calc.duration / 60))).toBe(false);
+  });
+});
+
+describe("deleteWorkout", () => {
+  const auth: AuthData = {
+    accessToken: "tok",
+    userId: "user1",
+    region: "us",
+    timestamp: 0,
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("POSTs the id wrapped in a single-element array to /program/delete", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({ result: "0000", message: "OK" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deleteWorkout(auth, "12345");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://teamapi.coros.com/training/program/delete");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual(["12345"]); // array, not bare id
+  });
+
+  it("throws when the API returns a non-0000 result", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({ result: "1001", message: "Not found" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteWorkout(auth, "bad-id")).rejects.toThrow("Not found");
+  });
+});
+
+describe("formatWorkoutSummary", () => {
+  it("includes the id, name, and rounded duration", () => {
+    const line = formatWorkoutSummary({
+      id: "426109589008859136",
+      name: "Push Day",
+      estimatedTime: 2700, // 45 min
+      totalSets: 18,
+      exerciseNum: 6,
+    });
+    expect(line).toContain("**Push Day**");
+    expect(line).toContain("[id: 426109589008859136]");
+    expect(line).toContain("45 min");
+    expect(line).toContain("18 sets");
+    expect(line).toContain("6 exercises");
+  });
+
+  it("falls back to duration when estimatedTime is absent, and overview onto a new line", () => {
+    const line = formatWorkoutSummary({
+      id: "7",
+      name: "Easy Run",
+      duration: 1800, // 30 min
+      overview: "Zone 2 base",
+    });
+    expect(line).toContain("[id: 7]");
+    expect(line).toContain("30 min");
+    expect(line).toContain("\n  Zone 2 base");
+  });
+
+  it("shows zeroes when set/exercise counts are missing", () => {
+    const line = formatWorkoutSummary({ id: "1", name: "Empty" });
+    expect(line).toContain("0 min");
+    expect(line).toContain("0 sets");
+    expect(line).toContain("0 exercises");
   });
 });

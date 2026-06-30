@@ -145,6 +145,68 @@ line, and zero-defaults for missing counts.
 
 ---
 
+### 7. Expiry-aware auth errors (MEDIUM PRIORITY)
+
+`getValidAuth()` returns a stored/injected token **without checking validity** — an expired
+token fails mid-call with a generic `COROS API error (...)`. Detect the auth-failure result
+code from the API and return a clear, actionable message instead, e.g.
+*"COROS token expired or invalid — re-run set_token / refresh COROS_TOKEN."*
+
+**Where:** `apiPost`/`apiGet` in `src/coros-api.ts` already throw on `result !== "0000"`.
+Identify the specific result/apiCode COROS returns for an invalid token (needs a capture —
+let an expired/garbage token through and record the response), then special-case it.
+
+---
+
+### 8. Store token in OS keychain instead of plaintext `auth.json` (LOW PRIORITY)
+
+`auth.json` is plaintext (mode 0600) at `~/.config/coros-workout-mcp/auth.json`. Independent
+of how the token is acquired, moving it to the **macOS Keychain** (and equivalents) would
+harden the credential at rest. This is a storage swap behind `storeAuth`/`loadAuth`, not an
+auth-method change.
+
+---
+
+## Open questions (need investigation)
+
+Unknowns surfaced during live testing / the auth discussion. Each needs a real capture or
+experiment before a decision — do not assume.
+
+### A. Token lifetime (TTL)
+The browser/`accesstoken` worked in every live test but **was never observed expiring**. If
+it is long-lived (days/weeks), manual `set_token` reuse is a non-issue; if hours, a
+programmatic-harvest or self-renewing flow becomes worth building. **To answer:** record when
+a captured token first starts returning auth errors.
+
+### B. Does `/account/login` return a refresh token or expiry timestamp?
+Only request headers were captured, never the full **login response body**. If COROS issues a
+refresh token or an `expiresAt`, a silent-renew flow is possible (no re-copy, no password).
+**To answer:** capture the full `POST /account/login` response and inspect `data`.
+
+### C. Does logging out on the web revoke the token?
+Web app + API share **one** session token (same value in the `accesstoken` header and the
+`CPL-coros-token` cookie; an API login invalidates the web session). It is **untested**
+whether explicitly logging out on the web revokes the shared token (likely) vs. just closing
+the tab (likely harmless). **To answer:** capture a token, log out on web, retry an MCP call.
+
+### D. Does the COROS phone app hold a separate, independent session?
+Only the **web** session token was observed. If the mobile app maintains its own session
+slot, it could be a browser-free token source that doesn't fight the web session. **Unknown —
+do not claim it works** without testing. **To answer:** capture the app's `accesstoken` (proxy
+the phone) and check whether using it disturbs the web session.
+
+### E. Auth method trade-off (decision, pending A–D)
+Two acquisition paths, mutually exclusive on their costs:
+- **Browser-token reuse** (`set_token` / `COROS_TOKEN`): no password stored, web session
+  preserved — but needs a logged-in browser to extract and the token expires.
+- **Email/password login** (`authenticate_coros` / `COROS_EMAIL`+`COROS_PASSWORD`): fully
+  automated and self-renewing — but stores the password and **invalidates the web session**.
+
+There is **no browser-free *and* password-free path** in what's been observed: a token can
+only originate from a login somewhere. Pick per A–D findings.
+
+---
+
 ## Quick reference
 
 ### Key files

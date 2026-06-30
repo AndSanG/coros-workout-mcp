@@ -79,68 +79,12 @@ Fully documented in `research/RUN-WORKOUT-HR-ANALYSIS.md`. Confirmed working:
 
 ---
 
-### 3. Tests for run workout functions (MEDIUM PRIORITY)
+### 3. Tests for run workout functions — ✅ DONE
 
-`src/__tests__/coros-api.test.ts` covers the strength path but **none of the run code has tests**.
-
-**Add to `src/__tests__/coros-api.test.ts`:**
-
-```typescript
-describe("resolveRunSteps", () => {
-  it("builds a simple warmup + training + cooldown", () => {
-    const steps = resolveRunSteps([
-      { type: "warmup", targetType: "open" },
-      { type: "training", targetType: "time", durationSeconds: 300, intensityMode: "heart_rate", bpmLow: 140, bpmHigh: 160 },
-      { type: "cooldown", targetType: "open" },
-    ]);
-    expect(steps).toHaveLength(3);
-    expect(steps[0].exerciseType).toBe(1); // warmup = T1120
-    expect(steps[1].intensityValue).toBe(140);
-    expect(steps[1].intensityValueExtend).toBe(160);
-    expect(steps[1].hrType).toBe(2);
-    expect(steps[1].isIntensityPercent).toBe(false);
-    expect(steps[2].exerciseType).toBe(3); // cooldown = T1122
-  });
-
-  it("builds a repeat group with correct groupId references", () => {
-    const steps = resolveRunSteps([
-      { type: "warmup", targetType: "open" },
-      { repeat: 3, restSeconds: 60, steps: [
-        { type: "training", targetType: "distance", distanceKm: 1 },
-        { type: "rest", targetType: "time", durationSeconds: 90 },
-      ]},
-      { type: "cooldown", targetType: "open" },
-    ]);
-    // warmup + group + training + rest + cooldown = 5
-    expect(steps).toHaveLength(5);
-    expect(steps[1].isGroup).toBe(true);
-    expect(steps[1].sets).toBe(3);
-    expect(steps[2].groupId).toBe("2"); // groupId = group's id
-    expect(steps[3].groupId).toBe("2");
-    expect(steps[4].groupId).toBe("");  // cooldown is outside the group
-  });
-
-  it("converts distance km to cm", () => {
-    const steps = resolveRunSteps([
-      { type: "training", targetType: "distance", distanceKm: 1.5 },
-    ]);
-    expect(steps[0].targetType).toBe(5);
-    expect(steps[0].targetValue).toBe(150000); // 1.5 km = 150 000 cm
-  });
-
-  it("encodes %LTHR correctly", () => {
-    const steps = resolveRunSteps([
-      { type: "training", targetType: "time", durationSeconds: 300,
-        intensityMode: "percent_lthr", percentLow: 91, percentHigh: 95, bpmLow: 157, bpmHigh: 164 },
-    ]);
-    expect(steps[0].hrType).toBe(3);
-    expect(steps[0].isIntensityPercent).toBe(true);
-    expect(steps[0].intensityPercent).toBe(91000);
-    expect(steps[0].intensityPercentExtend).toBe(95000);
-    expect(steps[0].intensityCustom).toBe(2);
-  });
-});
-```
+Added a `describe("resolveRunSteps")` block to `src/__tests__/coros-api.test.ts` (8 cases):
+warmup/training/cooldown encoding, repeat-group `groupId` references, km→cm distance
+conversion, %LTHR percent encoding, plus the task-4 `trainingLoad` and `hrRecovery`
+targets (custom + default values). Suite is now **35 tests**, all offline (no API calls).
 
 ---
 
@@ -204,7 +148,7 @@ Add a section for `create_run_workout` with the full schema and an example call,
 ### Commands
 ```bash
 npm run build   # compile TypeScript → dist/
-npm test        # vitest (27 tests currently)
+npm test        # vitest (35 tests currently)
 ```
 
 ### Auth for manual testing

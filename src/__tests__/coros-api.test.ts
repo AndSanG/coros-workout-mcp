@@ -3,6 +3,7 @@ import {
   buildExercisePayload,
   buildWorkoutPayload,
   resolveExercises,
+  resolveRunSteps,
 } from "../coros-api.js";
 import { findByName } from "../exercise-catalog.js";
 
@@ -144,5 +145,118 @@ describe("coros-api payload construction", () => {
         resolveExercises([{ name: "Nonexistent Exercise" }])
       ).toThrow('Exercise not found in catalog: "Nonexistent Exercise"');
     });
+  });
+});
+
+describe("resolveRunSteps", () => {
+  it("builds a simple warmup + training + cooldown", () => {
+    const steps = resolveRunSteps([
+      { type: "warmup", targetType: "open" },
+      {
+        type: "training",
+        targetType: "time",
+        durationSeconds: 300,
+        intensityMode: "heart_rate",
+        bpmLow: 140,
+        bpmHigh: 160,
+      },
+      { type: "cooldown", targetType: "open" },
+    ]);
+
+    expect(steps).toHaveLength(3);
+    expect(steps[0].exerciseType).toBe(1); // warmup = T1120
+    expect(steps[0].targetType).toBe(1); // open
+    expect(steps[1].targetType).toBe(2); // time
+    expect(steps[1].targetValue).toBe(300);
+    expect(steps[1].intensityType).toBe(2);
+    expect(steps[1].hrType).toBe(2);
+    expect(steps[1].isIntensityPercent).toBe(false);
+    expect(steps[1].intensityValue).toBe(140);
+    expect(steps[1].intensityValueExtend).toBe(160);
+    expect(steps[2].exerciseType).toBe(3); // cooldown = T1122
+  });
+
+  it("builds a repeat group with correct groupId references", () => {
+    const steps = resolveRunSteps([
+      { type: "warmup", targetType: "open" },
+      {
+        repeat: 3,
+        restSeconds: 60,
+        steps: [
+          { type: "training", targetType: "distance", distanceKm: 1 },
+          { type: "rest", targetType: "time", durationSeconds: 90 },
+        ],
+      },
+      { type: "cooldown", targetType: "open" },
+    ]);
+
+    // warmup + group + training + rest + cooldown = 5
+    expect(steps).toHaveLength(5);
+    expect(steps[1].isGroup).toBe(true);
+    expect(steps[1].sets).toBe(3);
+    expect(steps[1].restValue).toBe(60);
+    expect(steps[2].groupId).toBe("2"); // group's id, as a string
+    expect(steps[3].groupId).toBe("2");
+    expect(steps[4].groupId).toBe(""); // cooldown is outside the group
+  });
+
+  it("converts distance km to cm", () => {
+    const steps = resolveRunSteps([
+      { type: "training", targetType: "distance", distanceKm: 1.5 },
+    ]);
+    expect(steps[0].targetType).toBe(5);
+    expect(steps[0].targetValue).toBe(150000); // 1.5 km = 150 000 cm
+    expect(steps[0].targetDisplayUnit).toBe(1);
+  });
+
+  it("encodes %LTHR correctly", () => {
+    const steps = resolveRunSteps([
+      {
+        type: "training",
+        targetType: "time",
+        durationSeconds: 300,
+        intensityMode: "percent_lthr",
+        percentLow: 91,
+        percentHigh: 95,
+        bpmLow: 157,
+        bpmHigh: 164,
+      },
+    ]);
+    expect(steps[0].hrType).toBe(3);
+    expect(steps[0].isIntensityPercent).toBe(true);
+    expect(steps[0].intensityPercent).toBe(91000);
+    expect(steps[0].intensityPercentExtend).toBe(95000);
+    expect(steps[0].intensityCustom).toBe(2);
+  });
+
+  it("encodes a trainingLoad target", () => {
+    const steps = resolveRunSteps([
+      { type: "training", targetType: "trainingLoad", trainingLoadPoints: 120 },
+    ]);
+    expect(steps[0].targetType).toBe(6);
+    expect(steps[0].targetValue).toBe(120);
+  });
+
+  it("defaults trainingLoad to 100 points when omitted", () => {
+    const steps = resolveRunSteps([
+      { type: "training", targetType: "trainingLoad" },
+    ]);
+    expect(steps[0].targetValue).toBe(100);
+  });
+
+  it("encodes an hrRecovery target on a rest step", () => {
+    const steps = resolveRunSteps([
+      { type: "rest", targetType: "hrRecovery", hrRecoveryBpm: 110 },
+    ]);
+    expect(steps[0].exerciseType).toBe(4); // rest = T1123
+    expect(steps[0].targetType).toBe(7);
+    expect(steps[0].targetValue).toBe(110);
+  });
+
+  it("defaults hrRecovery to 120 bpm when omitted", () => {
+    const steps = resolveRunSteps([
+      { type: "rest", targetType: "hrRecovery" },
+    ]);
+    expect(steps[0].targetValue).toBe(120);
   });
 });

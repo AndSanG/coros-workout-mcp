@@ -150,7 +150,7 @@ export interface ExercisePayload {
   sourceUrl: string;
   sportType: number;
   status: number;
-  targetType: number;
+  targetType: number | string;
   targetValue: number;
   thumbnailUrl: string;
   userId: number;
@@ -223,6 +223,40 @@ export interface WorkoutPayload {
   sourceId: string;
   sets?: number;
   pitch?: number;
+  exerciseBarChart?: unknown[];
+}
+
+// --- Run workout input types ---
+
+export type RunIntensityMode =
+  | "heart_rate"      // direct bpm: hrType:2, isIntensityPercent:false
+  | "percent_max_hr"  // % max HR: hrType:1, isIntensityPercent:true
+  | "percent_hrr"     // % HR reserve: hrType:2, isIntensityPercent:true
+  | "percent_lthr"    // % lactate threshold HR: hrType:3, isIntensityPercent:true
+  | "pace"            // intensityType:3 (sec/km)
+  | "power"           // intensityType:6 (watts)
+  | "cadence"         // intensityType:7 (steps/min)
+  | "none";
+
+export interface RunStepInput {
+  type: "warmup" | "training" | "rest" | "cooldown";
+  targetType?: "time" | "distance" | "open";
+  durationSeconds?: number;
+  distanceKm?: number;
+  intensityMode?: RunIntensityMode;
+  bpmLow?: number;
+  bpmHigh?: number;
+  percentLow?: number;
+  percentHigh?: number;
+  intensityLow?: number;
+  intensityHigh?: number;
+  restSeconds?: number;
+}
+
+export interface RunGroupInput {
+  repeat: number;
+  steps: RunStepInput[];
+  restSeconds?: number;
 }
 
 // Raw exercise as returned by the COROS /training/exercise/query API

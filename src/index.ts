@@ -276,13 +276,17 @@ server.tool(
 const RunStepSchema = z.object({
   type: z.enum(["warmup", "training", "rest", "cooldown"])
     .describe("Step type"),
-  targetType: z.enum(["time", "distance", "open"])
+  targetType: z.enum(["time", "distance", "open", "trainingLoad", "hrRecovery"])
     .default("time")
-    .describe("'time' (durationSeconds), 'distance' (distanceKm), or 'open' (no target)"),
+    .describe("'time' (durationSeconds), 'distance' (distanceKm), 'open' (no target), 'trainingLoad' (trainingLoadPoints), or 'hrRecovery' (hrRecoveryBpm, rest steps only)"),
   durationSeconds: z.number().int().min(1).optional()
     .describe("Duration in seconds (required when targetType='time')"),
   distanceKm: z.number().min(0.001).optional()
     .describe("Distance in km (required when targetType='distance')"),
+  trainingLoadPoints: z.number().int().min(1).optional()
+    .describe("Training load target in TL points (required when targetType='trainingLoad')"),
+  hrRecoveryBpm: z.number().int().min(60).max(200).optional()
+    .describe("HR threshold in bpm; step ends when HR drops below it (targetType='hrRecovery', rest steps only)"),
   intensityMode: z.enum(["heart_rate", "percent_max_hr", "percent_hrr", "percent_lthr", "pace", "power", "cadence", "none"])
     .default("none")
     .describe("Intensity mode. HR modes need bpmLow/bpmHigh; percent_* also need percentLow/percentHigh; pace/power/cadence use intensityLow/intensityHigh"),

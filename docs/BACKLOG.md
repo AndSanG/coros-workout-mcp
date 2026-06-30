@@ -144,30 +144,18 @@ describe("resolveRunSteps", () => {
 
 ---
 
-### 4. `hrRecovery` target type for rest steps (LOW PRIORITY)
+### 4. `hrRecovery` + `trainingLoad` target types — ✅ DONE
 
-**What it is:** `targetType:7` — the watch waits until HR drops below a bpm threshold before advancing to the next step. Only meaningful on `rest` steps.
+**`hrRecovery`** (`targetType:7`) — the watch waits until HR drops below a bpm threshold before advancing. Only meaningful on `rest` steps. Field: `hrRecoveryBpm` (60–200, default 120).
 
-**Required changes:**
-1. In `src/types.ts`, extend `RunStepInput.targetType`:
-   ```typescript
-   targetType?: "time" | "distance" | "open" | "hrRecovery";
-   hrRecoveryBpm?: number; // bpm threshold, only used when targetType="hrRecovery"
-   ```
-2. In `buildRunStepPayload()` in `src/coros-api.ts`, add the case:
-   ```typescript
-   } else if (step.targetType === "hrRecovery") {
-     targetType = 7;
-     targetValue = step.hrRecoveryBpm ?? 120;
-     targetDisplayUnit = 0;
-   }
-   ```
-3. In the Zod schema in `src/index.ts`, add the enum value and field:
-   ```typescript
-   targetType: z.enum(["time", "distance", "open", "hrRecovery"]).default("time"),
-   hrRecoveryBpm: z.number().int().min(60).max(200).optional()
-     .describe("HR threshold in bpm (only for targetType='hrRecovery' on rest steps)"),
-   ```
+**`trainingLoad`** (`targetType:6`) — step ends when accumulated training load reaches a TL-point target. Field: `trainingLoadPoints` (default 100).
+
+Both codes confirmed in `research/RUN-WORKOUT-HR-ANALYSIS.md` (`targetTypeName` map: `6:"load"`, `7:"heartRateRecovery"`).
+
+**Changes made:**
+- `src/types.ts` — extended `RunStepInput.targetType` union, added `trainingLoadPoints?` + `hrRecoveryBpm?`.
+- `src/coros-api.ts` — added `trainingLoad`/`hrRecovery` branches in `buildRunStepPayload()`.
+- `src/index.ts` — extended the Zod enum and added both fields with descriptions.
 
 ---
 

@@ -240,9 +240,11 @@ export type RunIntensityMode =
 
 export interface RunStepInput {
   type: "warmup" | "training" | "rest" | "cooldown";
-  targetType?: "time" | "distance" | "open";
+  targetType?: "time" | "distance" | "open" | "trainingLoad" | "hrRecovery";
   durationSeconds?: number;
   distanceKm?: number;
+  trainingLoadPoints?: number; // targetType="trainingLoad": TL points (e.g. 100)
+  hrRecoveryBpm?: number; // targetType="hrRecovery": bpm threshold (rest steps only)
   intensityMode?: RunIntensityMode;
   bpmLow?: number;
   bpmHigh?: number;

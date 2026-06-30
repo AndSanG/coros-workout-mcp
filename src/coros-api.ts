@@ -514,6 +514,14 @@ function buildRunStepPayload(
   } else if (step.targetType === "open") {
     targetType = 1;
     targetValue = 0;
+  } else if (step.targetType === "trainingLoad") {
+    targetType = 6;
+    targetValue = step.trainingLoadPoints ?? 100;
+    targetDisplayUnit = 0;
+  } else if (step.targetType === "hrRecovery") {
+    targetType = 7;
+    targetValue = step.hrRecoveryBpm ?? 120;
+    targetDisplayUnit = 0;
   } else {
     targetType = 2;
     targetValue = step.durationSeconds ?? 300;

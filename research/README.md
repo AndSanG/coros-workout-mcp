@@ -8,6 +8,11 @@ using the Chrome DevTools MCP against `t.coros.com`.
 
 ## Files
 
+### `RUN-WORKOUT-BUILD-SUMMARY.md`
+How `create_run_workout` was actually built, in order (reverse-engineering → payload logic →
+remaining target types → tests → live integration). Build history, not the API reference —
+see `RUN-WORKOUT-HR-ANALYSIS.md` below for that.
+
 ### `RUN-WORKOUT-HR-ANALYSIS.md`
 The main reference document. Contains the complete encoding tables for running workouts:
 - Workout-level fields that differ from strength (`sportType:1`, `referExercise`, `fastIntensityTypeName`)

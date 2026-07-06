@@ -334,6 +334,20 @@ describe("deleteWorkout", () => {
 
     await expect(deleteWorkout(auth, "bad-id")).rejects.toThrow("Not found");
   });
+
+  it("throws a clear expired-token message on result 1019", async () => {
+    // 1019 is COROS's code for an invalid/revoked accesstoken (confirmed via a live
+    // capture: logging out then reusing the same token returns this). Generic API
+    // errors should still read the raw message, but this one should be actionable.
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({ result: "1019", message: "Access token is invalid" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteWorkout(auth, "12345")).rejects.toThrow(
+      "COROS token expired or invalid — re-run set_token / refresh COROS_TOKEN."
+    );
+  });
 });
 
 describe("formatWorkoutSummary", () => {

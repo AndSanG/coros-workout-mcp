@@ -40,37 +40,33 @@ Fully documented in `research/RUN-WORKOUT-HR-ANALYSIS.md`. Confirmed working:
 
 ## Pending tasks
 
-### 1. Tool: `set_token` (HIGH PRIORITY — partially done)
+### 1. Tool: `set_token` — ✅ DONE
 
-**Problem:** `authenticate_coros` logs in via the API, which **invalidates the user's browser session**. The user must choose between using the web app OR the MCP.
+**Problem it solves:** `authenticate_coros` logs in via the API, which **invalidates the user's
+browser session** (confirmed live — it evicts the shared `"web"` slot; see Open Questions C).
+`set_token` lets a token be persisted to `auth.json` without ever calling `/account/login`, so
+the browser session is never touched.
 
-**✅ Env-var half now implemented:** `getValidAuth()` now honors `COROS_TOKEN` + `COROS_USERID`
-(+ `COROS_REGION`) as an explicit-token override — it builds `AuthData` directly, no login,
-no file write, so the web session is never invalidated. (Previously the backlog claimed this
-worked, but `getValidAuth` only supported `auth.json` + `COROS_EMAIL`/`COROS_PASSWORD`.)
-**Still TODO:** the `set_token` *tool* itself (persists the token to `auth.json` so it
-survives without keeping env vars around).
+Registered in `src/index.ts`, right after `check_coros_auth`. Takes `accessToken`, `userId`,
+`region` and calls the already-exported `storeAuth()` from `coros-api.ts` — no changes needed
+there, and `getValidAuth()` already reads the stored file. The env-var half
+(`COROS_TOKEN`/`COROS_USERID`, no file write at all) was already implemented before this.
 
-**Solution:** Add a tool that accepts a token extracted directly from browser request headers, without doing a login call.
+**Two ways to get the token to feed it:**
 
-**Implementation:**
-1. In `src/index.ts`, register the new tool:
-   ```typescript
-   server.tool("set_token",
-     "Store a COROS session token obtained from the browser (avoids invalidating the web session).",
-     {
-       accessToken: z.string().describe("accesstoken header value from browser DevTools"),
-       userId: z.string().describe("userId from yfheader in browser DevTools"),
-       region: z.enum(["us", "eu"]).default("us"),
-     },
-     async ({ accessToken, userId, region }) => {
-       storeAuth({ accessToken, userId, region, timestamp: Date.now() });
-       return { content: [{ type: "text", text: `Token stored. userId: ${userId}, region: ${region}` }] };
-     }
-   )
-   ```
-2. `storeAuth` is already exported from `coros-api.ts` ✅ — no changes needed there.
-3. Nothing else to change — `getValidAuth()` already reads the stored auth.json.
+1. **Manual (no agent browser access):** DevTools → Network → any `teamapi.coros.com` request
+   → copy the `accesstoken` header and the `userId` from the `yfheader` request header → call
+   `set_token` with those values.
+2. **Agent-driven, no credentials typed anywhere (preferred when available):** if the assistant
+   has browser automation tools (e.g. the Chrome DevTools MCP) and the user already has an
+   active, logged-in COROS web session, the assistant can read the token directly off any
+   in-flight request — `list_network_requests` / `get_network_request` on any
+   `teamapi.coros.com` call shows the `accesstoken` header and `yfheader` (which contains
+   `userId`) — and call `set_token` with them. No login form, no credentials ever handled by
+   the assistant, no risk to the web session (this is exactly `getValidAuth`'s "acquire, don't
+   mint" path — see the auth-alternatives write-up under Open Questions). This is the same
+   technique used throughout the auth investigation earlier (`account/query` responses were
+   read this way to get the current token during the C/B captures).
 
 **How the user gets the token:** DevTools → Network → any request to `teamapi.coros.com` → `accesstoken` request header.
 
@@ -145,25 +141,33 @@ line, and zero-defaults for missing counts.
 
 ---
 
-### 7. Expiry-aware auth errors (MEDIUM PRIORITY)
+### 7. Expiry-aware auth errors — ✅ DONE
 
-`getValidAuth()` returns a stored/injected token **without checking validity** — an expired
-token fails mid-call with a generic `COROS API error (...)`. Detect the auth-failure result
-code from the API and return a clear, actionable message instead, e.g.
-*"COROS token expired or invalid — re-run set_token / refresh COROS_TOKEN."*
-
-**Where:** `apiPost`/`apiGet` in `src/coros-api.ts` already throw on `result !== "0000"`.
-Identify the specific result/apiCode COROS returns for an invalid token (needs a capture —
-let an expired/garbage token through and record the response), then special-case it.
+The result code was identified during the question-C live capture (see Open Questions below):
+COROS returns `result: "1019"`, message `"Access token is invalid"` for a revoked/invalid
+accesstoken. `apiPost`/`apiGet` in `src/coros-api.ts` now special-case it via a shared
+`assertApiSuccess()` helper, throwing *"COROS token expired or invalid — re-run set_token /
+refresh COROS_TOKEN."* instead of the generic `COROS API error (...)` message. `login()`'s own
+result check is untouched — that's a bad-credentials failure, not a stale-token one. Every
+other API call goes through `apiPost`/`apiGet` so picks this up automatically (e.g.
+`deleteWorkout`). Tested: added a case to the `describe("deleteWorkout")` block asserting the
+1019 response throws the clear message, not the raw one. Suite is now **42 tests**.
 
 ---
 
-### 8. Store token in OS keychain instead of plaintext `auth.json` (LOW PRIORITY)
+### 8. Store token in OS keychain instead of plaintext `auth.json` — DECLINED (2026-07-06)
 
 `auth.json` is plaintext (mode 0600) at `~/.config/coros-workout-mcp/auth.json`. Independent
 of how the token is acquired, moving it to the **macOS Keychain** (and equivalents) would
 harden the credential at rest. This is a storage swap behind `storeAuth`/`loadAuth`, not an
 auth-method change.
+
+**Decision: not doing this.** Explicitly declined after the auth investigation confirmed the
+risk this would mitigate is small: the token is bounded and revocable (question C — a logout
+kills it instantly, `result: "1019"`), likely expires on its own too (question A, unmeasured
+but presumably bounded), and file permissions already restrict it to the local user account.
+Don't resurface this unless something changes the risk model (e.g. the token turns out to be
+very long-lived, or `auth.json` needs to hold something more sensitive than it does today).
 
 ---
 
@@ -178,29 +182,98 @@ it is long-lived (days/weeks), manual `set_token` reuse is a non-issue; if hours
 programmatic-harvest or self-renewing flow becomes worth building. **To answer:** record when
 a captured token first starts returning auth errors.
 
-### B. Does `/account/login` return a refresh token or expiry timestamp?
-Only request headers were captured, never the full **login response body**. If COROS issues a
-refresh token or an `expiresAt`, a silent-renew flow is possible (no re-copy, no password).
-**To answer:** capture the full `POST /account/login` response and inspect `data`.
+### B. Does `/account/login` return a refresh token or expiry timestamp? — ✅ ANSWERED (2026-07-06)
+**No.** Captured the full response body with a standalone Puppeteer script (launched an
+isolated Chrome profile — see below — to sidestep the hard-redirect problem that defeated two
+earlier attempts via the Chrome DevTools MCP). Full shape:
 
-### C. Does logging out on the web revoke the token?
-Web app + API share **one** session token (same value in the `accesstoken` header and the
-`CPL-coros-token` cookie; an API login invalidates the web session). It is **untested**
-whether explicitly logging out on the web revokes the shared token (likely) vs. just closing
-the tab (likely harmless). **To answer:** capture a token, log out on web, retry an MCP call.
+```json
+{
+  "apiCode": "...", "result": "0000", "message": "OK",
+  "data": {
+    "accessToken": "...", "userId": "...", "email": "...",
+    "birthday": 19900408, "nickname": "...", "headPic": "...",
+    "maxHr": 196, "rhr": 50, "zoneData": {...}, "userProfile": {...},
+    "runScoreList": [...], "climbConfig": [...]
+    /* ...rest is user profile data, same shape as /account/query */
+  },
+  "extend": { "grayHeaders": {} }
+}
+```
 
-### D. Does the COROS phone app hold a separate, independent session?
-Only the **web** session token was observed. If the mobile app maintains its own session
-slot, it could be a browser-free token source that doesn't fight the web session. **Unknown —
-do not claim it works** without testing. **To answer:** capture the app's `accesstoken` (proxy
-the phone) and check whether using it disturbs the web session.
+No `refreshToken`, no `expiresAt`/`ttl`/expiry field anywhere. `login()` in `src/coros-api.ts`
+was already only reading `accessToken`/`userId` — confirmed there was nothing else worth
+capturing. **Conclusion for question E (auth method trade-off):** a self-renewing,
+password-free flow is not possible — COROS's login response gives no way to refresh a token
+without re-submitting credentials. The two acquisition paths remain genuinely exclusive on
+their costs; there's no middle ground to discover here.
 
-### E. Auth method trade-off (decision, pending A–D)
+**How it was captured (for future reference):** the Chrome DevTools MCP tools couldn't do this
+reliably — COROS's web app does a **hard page redirect** to the dashboard immediately after
+login (confirmed: the dashboard load shows up as a fresh top-level `GET`, not a client-side
+route change), which wipes the DevTools network log before the response can be read. Both a
+retroactive `includePreservedRequests` read and a `window.fetch`/`XMLHttpRequest` interceptor
+injected via `initScript` (writing to `localStorage` to survive the navigation) failed —
+confirmed with a control test that `includePreservedRequests` doesn't survive *any* explicit
+navigation in this tool, not just the login redirect. What worked: a standalone Node script
+(`puppeteer-core`, real CDP `page.on("response")` events, immune to the navigation-log-clearing
+issue) launching a **separate, isolated Chrome profile** — so no interaction with the real
+browser session or credentials was needed from the assistant. Script + output were kept in a
+scratch directory outside the repo, not committed.
+
+### C. Does logging out on the web revoke the token? — ✅ ANSWERED (2026-07-06)
+**Yes, immediately and server-side.** Live-tested: captured the active `accesstoken` from a
+logged-in browser session, called `GET /account/logout` directly (found via the bundled JS —
+`teamapi.coros.com/account/logout`, no body), then immediately retried the *same* token against
+`GET /account/query`. Result: `{"result":"1019","message":"Access token is invalid"}`. The
+browser's own session died at the same moment (confirmed — reload showed the login page).
+This is a genuine server-side revocation, not just a client-side cookie clear.
+
+**Bonus:** this identifies the exact result code for task 7 (expiry-aware auth errors) —
+`result: "1019"` / message `"Access token is invalid"` is COROS's auth-failure signature.
+`apiPost`/`apiGet` in `src/coros-api.ts` can special-case this now without further guessing.
+
+### D. Does the COROS phone app hold a separate, independent session? — ✅ ANSWERED behaviorally (2026-07-06)
+**Yes — confirmed independent.** Two complementary findings:
+
+1. **Web is unified across browsers, not per-browser.** Logging in on Chrome then Safari (same
+   account): only the most recent survives. So "the web session" isn't tied to a specific
+   browser/cookie jar — it's one server-side slot keyed by something like `(userId, platform)`,
+   and any web login (any browser, or our own `authenticate_coros`) evicts whatever was
+   previously in that slot.
+2. **Mobile does not share that slot.** Triggered a real login via `login()` (the same call
+   `authenticate_coros` makes) while the phone app was logged in and active. Result: the web
+   browser was evicted (expected), but **the phone app kept working, untouched.** If mobile used
+   the same slot as web, this login would have evicted it too — it didn't, so mobile is tracked
+   as a genuinely separate session, most likely a different platform/client-type key server-side.
+
+**Practical implication for question E:** the documented downside of `authenticate_coros`
+("invalidates the web session") is real but **narrower than previously assumed** — it costs you
+the browser tab, not your phone app. For anyone who mainly uses the phone day to day, automated
+email/password login is much less disruptive than the original write-up implied.
+
+**Still unresolved (lower priority now):** we still can't *extract* the phone's own token
+programmatically — the Charles Proxy attempt hit certificate pinning (undecryptable
+`coros.com` traffic even with the root cert fully trusted on-device; getting past that needs
+jailbreak/root + Frida/objection, deliberately not pursued, out of scope). That would have been
+a nice bonus (a password-free, non-disruptive token source) but is no longer the blocking
+question it was — we now know *behaviorally* that mobile is safe to leave alone regardless.
+
+### E. Auth method trade-off (decision, pending only A now)
 Two acquisition paths, mutually exclusive on their costs:
 - **Browser-token reuse** (`set_token` / `COROS_TOKEN`): no password stored, web session
   preserved — but needs a logged-in browser to extract and the token expires.
 - **Email/password login** (`authenticate_coros` / `COROS_EMAIL`+`COROS_PASSWORD`): fully
-  automated and self-renewing — but stores the password and **invalidates the web session**.
+  automated and self-renewing — invalidates the web session, but (per D) **not the phone app**.
+  Only the password itself is ever handled in-memory; only the resulting token is written to
+  `auth.json` (mode 0600) — same storage risk as the token-reuse path, not an additional one.
+
+B is resolved (no refresh token exists, so there's no hybrid option), C confirms browser-token
+reuse is fragile against any explicit logout anywhere on the shared web slot, and D confirms
+mobile is untouched by an API login. **Net effect: `authenticate_coros` is more attractive than
+originally written up**, especially for anyone who mainly interacts with COROS via the phone —
+its real cost is just the browser tab, not full account access. Still open: A (how long does an
+un-revoked token actually last?) — the last variable that could still shift this.
 
 There is **no browser-free *and* password-free path** in what's been observed: a token can
 only originate from a login somewhere. Pick per A–D findings.

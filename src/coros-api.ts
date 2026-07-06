@@ -111,6 +111,21 @@ function apiHeaders(auth: AuthData): Record<string, string> {
   };
 }
 
+// COROS's result code for an invalid/expired/revoked accesstoken (confirmed by capture:
+// calling /account/logout then reusing the same token returns this on the next call).
+const AUTH_INVALID_RESULT = "1019";
+
+function assertApiSuccess(data: any, path: string): void {
+  if (data.result === AUTH_INVALID_RESULT) {
+    throw new Error(
+      "COROS token expired or invalid — re-run set_token / refresh COROS_TOKEN."
+    );
+  }
+  if (data.result !== "0000") {
+    throw new Error(`COROS API error (${path}): ${data.message || data.result}`);
+  }
+}
+
 async function apiPost(auth: AuthData, path: string, body: unknown): Promise<unknown> {
   const apiUrl = REGION_URLS[auth.region];
   const res = await fetch(`${apiUrl}${path}`, {
@@ -119,9 +134,7 @@ async function apiPost(auth: AuthData, path: string, body: unknown): Promise<unk
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  if (data.result !== "0000") {
-    throw new Error(`COROS API error (${path}): ${data.message || data.result}`);
-  }
+  assertApiSuccess(data, path);
   return data;
 }
 
@@ -140,9 +153,7 @@ async function apiGet(
     headers: apiHeaders(auth),
   });
   const data = await res.json();
-  if (data.result !== "0000") {
-    throw new Error(`COROS API error (${path}): ${data.message || data.result}`);
-  }
+  assertApiSuccess(data, path);
   return data;
 }
 

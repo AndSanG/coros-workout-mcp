@@ -7,6 +7,7 @@ import {
   login,
   getValidAuth,
   loadAuth,
+  storeAuth,
   resolveExercises,
   calculateWorkout,
   addWorkout,
@@ -106,6 +107,28 @@ server.tool(
         {
           type: "text" as const,
           text: "Not authenticated. Use authenticate_coros tool, set COROS_TOKEN/COROS_USERID (browser token), or set COROS_EMAIL/COROS_PASSWORD env vars.",
+        },
+      ],
+    };
+  }
+);
+
+// --- Tool: set_token ---
+server.tool(
+  "set_token",
+  "Store a COROS session token extracted from an already-authenticated browser (DevTools → Network → any teamapi.coros.com request → accesstoken header, and userId from the yfheader). Unlike authenticate_coros, this does not log in and does not invalidate the browser's web session.",
+  {
+    accessToken: z.string().describe("accesstoken header value from browser DevTools"),
+    userId: z.string().describe("userId from yfheader in browser DevTools"),
+    region: z.enum(["us", "eu"]).default("us").describe("API region: 'us' or 'eu'"),
+  },
+  async ({ accessToken, userId, region }) => {
+    storeAuth({ accessToken, userId, region, timestamp: Date.now() });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Token stored. userId: ${userId}, region: ${region}. Web session left untouched.`,
         },
       ],
     };

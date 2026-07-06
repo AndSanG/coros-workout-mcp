@@ -25,7 +25,7 @@ To run a single test file: `npx vitest run src/__tests__/exercise-catalog.test.t
 
 **4 source files, clear separation:**
 
-- `index.ts` — MCP server setup. Registers 6 tools (`authenticate_coros`, `check_coros_auth`, `search_exercises`, `create_workout`, `update_exercises`, `list_workouts`) using `@modelcontextprotocol/sdk`. STDIO transport only.
+- `index.ts` — MCP server setup. Registers 9 tools (`authenticate_coros`, `check_coros_auth`, `set_token`, `search_exercises`, `create_workout`, `create_run_workout`, `update_exercises`, `list_workouts`, `delete_workout`) using `@modelcontextprotocol/sdk`. STDIO transport only.
 - `coros-api.ts` — COROS API client + payload construction. Handles auth (MD5 password hashing, token storage at `~/.config/coros-workout-mcp/auth.json`), and the workout creation flow: `resolveExercises()` → `calculateWorkout()` (POST `/training/program/calculate`) → `addWorkout()` (POST `/training/program/add`). Also contains `buildCatalogFromRaw()` for the `update_exercises` tool.
 - `exercise-catalog.ts` — In-memory exercise search engine. Loads `data/exercises.json` lazily, provides `findByName()` (exact, case-insensitive), `searchExercises()` (fuzzy name + muscle/bodyPart/equipment filters). The catalog is the single source of truth for exercise names used in `create_workout`.
 - `types.ts` — All interfaces and enum maps. Numeric code → human-readable name mappings for muscles, body parts, equipment. Key types: `CatalogExercise` (bundled catalog), `ExercisePayload` (API payload), `ExerciseOverrides` (user input), `RawExercise` (API response).
@@ -38,7 +38,7 @@ User provides exercise names + overrides → `findByName()` validates against ca
 - All exercises use numeric IDs internally (muscle, part, equipment, targetType, intensityType). The enum maps in `types.ts` handle code↔name translation.
 - `targetType`: 2=duration (seconds), 3=reps. `intensityType`: 0=none, 1=weight (in grams internally, kg in user-facing API).
 - Exercise names in `create_workout` must match `data/exercises.json` exactly (case-insensitive). The `search_exercises` tool helps users find correct names.
-- API auth requires `accesstoken` header + `yfheader` JSON with `userId`. Logging in via API invalidates the COROS web app session.
+- API auth requires `accesstoken` header + `yfheader` JSON with `userId`. Logging in via API invalidates the COROS web app session (confirmed: it's one shared server-side "web" slot, evicted by any login — any browser or `authenticate_coros` — but *not* by the mobile app, which holds an independent session). To avoid touching the web session at all, use `set_token` (or `COROS_TOKEN`/`COROS_USERID` env vars) with a token acquired from an already-logged-in browser rather than logging in again. If the assistant has browser automation tools available (e.g. Chrome DevTools MCP) and the user already has an active COROS web session, it can read the `accesstoken`/`yfheader` straight off any in-flight `teamapi.coros.com` request and call `set_token` directly — no credentials ever need to be typed or handled by the assistant.
 - Base URLs: `teameuapi.coros.com` (EU), `teamapi.coros.com` (US). Region defaults to `eu`.
 - `sportType: 4` = Strength Training throughout the codebase.
 

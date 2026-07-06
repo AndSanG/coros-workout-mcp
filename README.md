@@ -69,14 +69,16 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ## Tools
 
-| Tool | Description |
-|------|-------------|
-| `authenticate_coros` | Log in with email/password (or auto-login from env vars) |
-| `check_coros_auth` | Verify current auth status |
-| `search_exercises` | Search ~383 exercises by name, muscle, body part, equipment |
-| `create_workout` | Build and push a strength workout to COROS |
-| `update_exercises` | Fetch the latest exercise catalog from COROS and rebuild locally |
-| `list_workouts` | List existing workouts |
+| Tool                 | Description                                                                                                          |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `authenticate_coros` | Log in with email/password (or auto-login from env vars)                                                             |
+| `check_coros_auth`   | Verify current auth status                                                                                           |
+| `search_exercises`   | Search ~383 exercises by name, muscle, body part, equipment                                                          |
+| `create_workout`     | Build and push a strength workout to COROS                                                                           |
+| `create_run_workout` | Build and push a running workout (warmup/training/rest/cooldown steps, HR/pace/power/cadence targets, repeat groups) |
+| `update_exercises`   | Fetch the latest exercise catalog from COROS and rebuild locally                                                     |
+| `list_workouts`      | List existing workouts                                                                                               |
+| `delete_workout`     | Delete a workout by ID (destructive, requires explicit confirmation)                                                 |
 
 ## Example conversation
 

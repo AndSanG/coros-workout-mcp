@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 import type {
   AuthData,
+  BikeGroupInput,
+  BikeStepInput,
   CatalogExercise,
   ExerciseOverrides,
   ExercisePayload,
@@ -821,6 +823,286 @@ export async function addRunWorkout(
   calculated: RunCalculateResult
 ): Promise<unknown> {
   const payload = buildRunWorkoutPayload(name, overview, steps);
+  payload.duration = calculated.duration;
+  payload.totalSets = calculated.totalSets;
+  payload.trainingLoad = calculated.trainingLoad;
+  payload.distance = calculated.distance;
+  payload.sets = calculated.totalSets;
+  payload.pitch = 0;
+  payload.exerciseBarChart = calculated.exerciseBarChart;
+  return apiPost(auth, "/training/program/add", payload);
+}
+
+// --- Bike workout payload construction ---
+
+const BIKE_STEP_META = {
+  warmup:   { exerciseType: 1, defaultOrder: 1, name: "T1120", overview: "sid_bike_warm_up_dist",  originId: "425895398452936705", createTimestamp: 1586585721, isDefaultAdd: 0 },
+  training: { exerciseType: 2, defaultOrder: 2, name: "T4000", overview: "sid_bike_dist_speed",     originId: "426109589008859136", createTimestamp: 1586585061, isDefaultAdd: 1 },
+  rest:     { exerciseType: 4, defaultOrder: 3, name: "T1123", overview: "sid_bike_cool_down_dist", originId: "425895398452936705", createTimestamp: 1586585838, isDefaultAdd: 0 },
+  cooldown: { exerciseType: 3, defaultOrder: 3, name: "T1122", overview: "sid_bike_cool_down_dist", originId: "425895456971866112", createTimestamp: 1586585838, isDefaultAdd: 0 },
+} as const;
+
+const BIKE_SOURCE_URL =
+  "https://d31oxp44ddzkyk.cloudfront.net/source/source_default/0/47a2076264084ba78e44b7bb0ca36a0c.jpg";
+const BIKE_SOURCE_ID = "425868133463670785";
+
+function buildBikeStepPayload(
+  step: BikeStepInput,
+  id: number,
+  groupId: number | ""
+): ExercisePayload {
+  const meta = BIKE_STEP_META[step.type];
+
+  // Target (same encoding as run: time=2/sec, distance=5/cm, trainingLoad=6/pts, open=1, hrRecovery=7/bpm)
+  let targetType: number | string = 2;
+  let targetValue = 300;
+  let targetDisplayUnit = 0;
+  if (step.targetType === "distance") {
+    targetType = 5;
+    targetValue = Math.round((step.distanceKm ?? 1) * 100000); // km → cm
+    targetDisplayUnit = 1;
+  } else if (step.targetType === "open") {
+    targetType = 1;
+    targetValue = 0;
+  } else if (step.targetType === "trainingLoad") {
+    targetType = 6;
+    targetValue = step.trainingLoadPoints ?? 100;
+  } else if (step.targetType === "hrRecovery") {
+    targetType = 7;
+    targetValue = step.hrRecoveryBpm ?? 120;
+  } else {
+    targetType = 2;
+    targetValue = step.durationSeconds ?? 300;
+  }
+
+  // Intensity
+  let intensityType = 0;
+  let hrType = 0;
+  let isIntensityPercent = false;
+  let intensityCustom = 0;
+  let intensityValue = 0;
+  let intensityValueExtend = 0;
+  let intensityPercent = 0;
+  let intensityPercentExtend = 0;
+  let intensityDisplayUnit: string = "0";
+
+  const mode = step.intensityMode ?? "none";
+  if (mode === "heart_rate") {
+    intensityType = 2; hrType = 2; isIntensityPercent = false; intensityCustom = 0;
+    intensityValue = step.bpmLow ?? 0;
+    intensityValueExtend = step.bpmHigh ?? 0;
+  } else if (mode === "percent_max_hr") {
+    intensityType = 2; hrType = 1; isIntensityPercent = true; intensityCustom = 2;
+    intensityValue = step.bpmLow ?? 0;
+    intensityValueExtend = step.bpmHigh ?? 0;
+    intensityPercent = Math.round((step.percentLow ?? 0) * 1000);
+    intensityPercentExtend = Math.round((step.percentHigh ?? 0) * 1000);
+  } else if (mode === "percent_hrr") {
+    intensityType = 2; hrType = 2; isIntensityPercent = true; intensityCustom = 2;
+    intensityValue = step.bpmLow ?? 0;
+    intensityValueExtend = step.bpmHigh ?? 0;
+    intensityPercent = Math.round((step.percentLow ?? 0) * 1000);
+    intensityPercentExtend = Math.round((step.percentHigh ?? 0) * 1000);
+  } else if (mode === "percent_lthr") {
+    intensityType = 2; hrType = 3; isIntensityPercent = true; intensityCustom = 2;
+    intensityValue = step.bpmLow ?? 0;
+    intensityValueExtend = step.bpmHigh ?? 0;
+    intensityPercent = Math.round((step.percentLow ?? 0) * 1000);
+    intensityPercentExtend = Math.round((step.percentHigh ?? 0) * 1000);
+  } else if (mode === "percent_ftp") {
+    // %FTP: intensityValue/Extend carry the absolute watts (caller-supplied, same
+    // convention as the HR percent modes needing both bpm and percent fields).
+    intensityType = 9; hrType = 0; isIntensityPercent = true; intensityCustom = 2;
+    intensityValue = step.intensityLow ?? 0;
+    intensityValueExtend = step.intensityHigh ?? 0;
+    intensityPercent = Math.round((step.percentLow ?? 0) * 1000);
+    intensityPercentExtend = Math.round((step.percentHigh ?? 0) * 1000);
+  } else if (mode === "power") {
+    intensityType = 6;
+    intensityValue = step.intensityLow ?? 0;
+    intensityValueExtend = step.intensityHigh ?? 0;
+  } else if (mode === "speed") {
+    intensityType = 4;
+    intensityDisplayUnit = "4";
+    intensityValue = Math.round((step.intensityLow ?? 0) * 100); // km/h × 100
+    intensityValueExtend = Math.round((step.intensityHigh ?? 0) * 100);
+  } else if (mode === "cadence") {
+    intensityType = 7;
+    intensityValue = step.intensityLow ?? 0;
+    intensityValueExtend = step.intensityHigh ?? 0;
+  }
+
+  return {
+    access: 0,
+    animationId: 0,
+    coverUrlArrStr: "",
+    createTimestamp: meta.createTimestamp,
+    defaultOrder: meta.defaultOrder,
+    equipment: [1],
+    exerciseType: meta.exerciseType,
+    id,
+    intensityCustom,
+    intensityType,
+    intensityValue,
+    isDefaultAdd: meta.isDefaultAdd,
+    isGroup: false,
+    isIntensityPercent,
+    muscle: [],
+    muscleRelevance: [],
+    name: meta.name,
+    overview: meta.overview,
+    part: [0],
+    restType: 3,
+    restValue: step.restSeconds ?? 0,
+    sets: 1,
+    sortNo: id,
+    sourceUrl: "",
+    sportType: 2,
+    status: 0,
+    targetType,
+    targetValue,
+    thumbnailUrl: "",
+    userId: 0,
+    videoInfos: [],
+    videoUrl: "",
+    videoUrlArrStr: "",
+    nameText: "",
+    desc: "",
+    descText: "",
+    partText: "",
+    muscleText: "",
+    secondaryMuscleText: "",
+    equipmentText: "",
+    groupId: groupId === "" ? "" : String(groupId),
+    originId: meta.originId,
+    targetDisplayUnit,
+    hrType,
+    intensityValueExtend,
+    intensityMultiplier: 0,
+    intensityPercent,
+    intensityPercentExtend,
+    intensityDisplayUnit,
+  };
+}
+
+export function resolveBikeSteps(
+  items: Array<BikeStepInput | BikeGroupInput>
+): ExercisePayload[] {
+  const payloads: ExercisePayload[] = [];
+  let nextId = 1;
+
+  for (const item of items) {
+    if ("repeat" in item) {
+      const groupId = nextId;
+      payloads.push(buildGroupStep(groupId, item.repeat, item.restSeconds ?? 30));
+      nextId++;
+      for (const child of item.steps) {
+        payloads.push(buildBikeStepPayload(child, nextId, groupId));
+        nextId++;
+      }
+    } else {
+      payloads.push(buildBikeStepPayload(item, nextId, ""));
+      nextId++;
+    }
+  }
+
+  return payloads;
+}
+
+export function buildBikeWorkoutPayload(
+  name: string,
+  overview: string,
+  steps: ExercisePayload[]
+): WorkoutPayload {
+  return {
+    access: 1,
+    authorId: "0",
+    createTimestamp: 0,
+    distance: 0,
+    duration: 0,
+    essence: 0,
+    estimatedType: 0,
+    estimatedValue: 0,
+    exerciseNum: 0,
+    exercises: steps,
+    headPic: "",
+    id: "0",
+    idInPlan: "0",
+    name,
+    nickname: "",
+    originEssence: 0,
+    overview,
+    pbVersion: 2,
+    planIdIndex: 0,
+    poolLength: 2500,
+    profile: "",
+    referExercise: { intensityType: 0, hrType: 0, valueType: 0 },
+    sex: 0,
+    shareUrl: "",
+    simple: false,
+    sourceUrl: BIKE_SOURCE_URL,
+    sportType: 2,
+    star: 0,
+    subType: 65535,
+    targetType: 0,
+    targetValue: 0,
+    thirdPartyId: 0,
+    totalSets: 0,
+    trainingLoad: 0,
+    type: 0,
+    unit: 0,
+    userId: "0",
+    version: 0,
+    videoCoverUrl: "",
+    videoUrl: "",
+    fastIntensityTypeName: "custom",
+    poolLengthId: 1,
+    poolLengthUnit: 2,
+    sourceId: BIKE_SOURCE_ID,
+  };
+}
+
+export interface BikeCalculateResult {
+  duration: number;
+  totalSets: number;
+  trainingLoad: number;
+  distance: string;
+  exerciseBarChart: unknown[];
+}
+
+export async function calculateBikeWorkout(
+  auth: AuthData,
+  name: string,
+  overview: string,
+  steps: ExercisePayload[]
+): Promise<BikeCalculateResult> {
+  const payload = buildBikeWorkoutPayload(name, overview, steps);
+  const result = (await apiPost(auth, "/training/program/calculate", payload)) as {
+    data: {
+      planDuration: number;
+      planSets: number;
+      planTrainingLoad: number;
+      planDistance: string;
+      exerciseBarChart: unknown[];
+    };
+  };
+  return {
+    duration: result.data.planDuration,
+    totalSets: result.data.planSets,
+    trainingLoad: result.data.planTrainingLoad,
+    distance: result.data.planDistance ?? "0",
+    exerciseBarChart: result.data.exerciseBarChart ?? [],
+  };
+}
+
+export async function addBikeWorkout(
+  auth: AuthData,
+  name: string,
+  overview: string,
+  steps: ExercisePayload[],
+  calculated: BikeCalculateResult
+): Promise<unknown> {
+  const payload = buildBikeWorkoutPayload(name, overview, steps);
   payload.duration = calculated.duration;
   payload.totalSets = calculated.totalSets;
   payload.trainingLoad = calculated.trainingLoad;

@@ -14,6 +14,9 @@ import {
   resolveRunSteps,
   calculateRunWorkout,
   addRunWorkout,
+  resolveBikeSteps,
+  calculateBikeWorkout,
+  addBikeWorkout,
   queryWorkouts,
   deleteWorkout,
   formatWorkoutSummary,
@@ -28,7 +31,7 @@ import {
   reloadCatalog,
   getCatalogPath,
 } from "./exercise-catalog.js";
-import type { Region, RunStepInput, RunGroupInput } from "./types.js";
+import type { Region, RunStepInput, RunGroupInput, BikeStepInput, BikeGroupInput } from "./types.js";
 
 const server = new McpServer({
   name: "coros-workout",
@@ -384,6 +387,100 @@ server.tool(
         content: [{
           type: "text" as const,
           text: `Failed to create run workout: ${error instanceof Error ? error.message : String(error)}`,
+        }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// --- Tool: create_bike_workout ---
+const BikeStepSchema = z.object({
+  type: z.enum(["warmup", "training", "rest", "cooldown"])
+    .describe("Step type"),
+  targetType: z.enum(["time", "distance", "open", "trainingLoad", "hrRecovery"])
+    .default("time")
+    .describe("'time' (durationSeconds), 'distance' (distanceKm), 'open' (no target), 'trainingLoad' (trainingLoadPoints), or 'hrRecovery' (hrRecoveryBpm, rest steps only)"),
+  durationSeconds: z.number().int().min(1).optional()
+    .describe("Duration in seconds (required when targetType='time')"),
+  distanceKm: z.number().min(0.001).optional()
+    .describe("Distance in km (required when targetType='distance')"),
+  trainingLoadPoints: z.number().int().min(1).optional()
+    .describe("Training load target in TL points (required when targetType='trainingLoad')"),
+  hrRecoveryBpm: z.number().int().min(60).max(200).optional()
+    .describe("HR threshold in bpm; step ends when HR drops below it (targetType='hrRecovery', rest steps only)"),
+  intensityMode: z.enum(["heart_rate", "percent_max_hr", "percent_hrr", "percent_lthr", "percent_ftp", "power", "speed", "cadence", "none"])
+    .default("none")
+    .describe("Intensity mode. HR modes need bpmLow/bpmHigh; percent_* and percent_ftp also need percentLow/percentHigh (percent_ftp also needs intensityLow/intensityHigh in watts); power/speed/cadence use intensityLow/intensityHigh"),
+  bpmLow: z.number().int().min(30).max(250).optional()
+    .describe("Lower HR bound in bpm (heart_rate / percent_* modes)"),
+  bpmHigh: z.number().int().min(30).max(250).optional()
+    .describe("Upper HR bound in bpm"),
+  percentLow: z.number().min(0).max(200).optional()
+    .describe("Lower intensity % (e.g. 80 for 80%) for percent_max_hr / percent_hrr / percent_lthr / percent_ftp"),
+  percentHigh: z.number().min(0).max(200).optional()
+    .describe("Upper intensity %"),
+  intensityLow: z.number().min(0).optional()
+    .describe("Lower intensity value for power (watts), speed (km/h), cadence (rpm), or percent_ftp (watts)"),
+  intensityHigh: z.number().min(0).optional()
+    .describe("Upper intensity value"),
+  restSeconds: z.number().int().min(0).default(0)
+    .describe("Rest after this step in seconds"),
+});
+
+const BikeGroupSchema = z.object({
+  repeat: z.number().int().min(2).max(99)
+    .describe("Number of repetitions for the group"),
+  steps: z.array(BikeStepSchema).min(1)
+    .describe("Steps inside the repeat group"),
+  restSeconds: z.number().int().min(0).default(30)
+    .describe("Rest between repetitions in seconds"),
+});
+
+server.tool(
+  "create_bike_workout",
+  "Create a cycling workout on COROS Training Hub. Supports warm-up, training, rest, and cool-down steps with HR targets (% max HR, % HRR, % LTHR, direct bpm), %FTP, power (watts), speed (km/h), cadence (rpm), time/distance targets, and repeat groups.",
+  {
+    name: z.string().describe("Workout name"),
+    overview: z.string().default("").describe("Workout description"),
+    steps: z.array(z.union([BikeStepSchema, BikeGroupSchema])).min(1)
+      .describe("Array of steps (each is a plain step or a repeat group with nested steps)"),
+  },
+  async ({ name, overview, steps }) => {
+    try {
+      const auth = await getValidAuth();
+      if (!auth) {
+        return {
+          content: [{ type: "text" as const, text: "Not authenticated. Use authenticate_coros first." }],
+          isError: true,
+        };
+      }
+
+      const bikeSteps = resolveBikeSteps(steps as Array<BikeStepInput | BikeGroupInput>);
+      const calculated = await calculateBikeWorkout(auth, name, overview, bikeSteps);
+      await addBikeWorkout(auth, name, overview, bikeSteps, calculated);
+
+      const durationMin = Math.round(calculated.duration / 60);
+      const distanceKm = calculated.distance && parseFloat(calculated.distance) > 0
+        ? ` | Distance: ~${(parseFloat(calculated.distance) / 100000).toFixed(2)} km`
+        : "";
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: [
+            `Bike workout "${name}" created successfully!`,
+            `Duration: ~${durationMin} min | Sets: ${calculated.totalSets} | Training load: ${calculated.trainingLoad}${distanceKm}`,
+            "",
+            "The workout will sync to your COROS watch.",
+          ].join("\n"),
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Failed to create bike workout: ${error instanceof Error ? error.message : String(error)}`,
         }],
         isError: true,
       };

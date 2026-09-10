@@ -76,6 +76,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `search_exercises`   | Search ~383 exercises by name, muscle, body part, equipment                                                          |
 | `create_workout`     | Build and push a strength workout to COROS                                                                           |
 | `create_run_workout` | Build and push a running workout (warmup/training/rest/cooldown steps, HR/pace/power/cadence targets, repeat groups) |
+| `create_bike_workout`| Build and push a cycling workout (warmup/training/rest/cooldown steps, HR/%FTP/power/speed/cadence targets, repeat groups) |
 | `update_exercises`   | Fetch the latest exercise catalog from COROS and rebuild locally                                                     |
 | `list_workouts`      | List existing workouts                                                                                               |
 | `delete_workout`     | Delete a workout by ID (destructive, requires explicit confirmation)                                                 |

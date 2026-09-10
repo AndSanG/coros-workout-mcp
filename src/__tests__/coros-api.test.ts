@@ -4,6 +4,7 @@ import {
   buildWorkoutPayload,
   resolveExercises,
   resolveRunSteps,
+  resolveBikeSteps,
   calculateWorkout,
   deleteWorkout,
   formatWorkoutSummary,
@@ -262,6 +263,159 @@ describe("resolveRunSteps", () => {
       { type: "rest", targetType: "hrRecovery" },
     ]);
     expect(steps[0].targetValue).toBe(120);
+  });
+});
+
+describe("resolveBikeSteps", () => {
+  it("builds a simple warmup + training + cooldown", () => {
+    const steps = resolveBikeSteps([
+      { type: "warmup", targetType: "open" },
+      {
+        type: "training",
+        targetType: "time",
+        durationSeconds: 300,
+        intensityMode: "heart_rate",
+        bpmLow: 140,
+        bpmHigh: 160,
+      },
+      { type: "cooldown", targetType: "open" },
+    ]);
+
+    expect(steps).toHaveLength(3);
+    expect(steps[0].exerciseType).toBe(1); // warmup = T1120
+    expect(steps[0].targetType).toBe(1); // open
+    expect(steps[0].sportType).toBe(2); // bike
+    expect(steps[1].name).toBe("T4000"); // training = T4000 (bike-specific code)
+    expect(steps[1].targetType).toBe(2); // time
+    expect(steps[1].targetValue).toBe(300);
+    expect(steps[1].intensityType).toBe(2);
+    expect(steps[1].hrType).toBe(2);
+    expect(steps[1].isIntensityPercent).toBe(false);
+    expect(steps[1].intensityValue).toBe(140);
+    expect(steps[1].intensityValueExtend).toBe(160);
+    expect(steps[2].exerciseType).toBe(3); // cooldown = T1122
+  });
+
+  it("builds a repeat group with correct groupId references", () => {
+    const steps = resolveBikeSteps([
+      { type: "warmup", targetType: "open" },
+      {
+        repeat: 3,
+        restSeconds: 60,
+        steps: [
+          { type: "training", targetType: "distance", distanceKm: 1 },
+          { type: "rest", targetType: "time", durationSeconds: 90 },
+        ],
+      },
+      { type: "cooldown", targetType: "open" },
+    ]);
+
+    // warmup + group + training + rest + cooldown = 5
+    expect(steps).toHaveLength(5);
+    expect(steps[1].isGroup).toBe(true);
+    expect(steps[1].sets).toBe(3);
+    expect(steps[1].restValue).toBe(60);
+    expect(steps[2].groupId).toBe("2"); // group's id, as a string
+    expect(steps[3].groupId).toBe("2");
+    expect(steps[4].groupId).toBe(""); // cooldown is outside the group
+  });
+
+  it("converts distance km to cm", () => {
+    const steps = resolveBikeSteps([
+      { type: "training", targetType: "distance", distanceKm: 1.5 },
+    ]);
+    expect(steps[0].targetType).toBe(5);
+    expect(steps[0].targetValue).toBe(150000); // 1.5 km = 150 000 cm
+    expect(steps[0].targetDisplayUnit).toBe(1);
+  });
+
+  it("encodes %FTP correctly", () => {
+    const steps = resolveBikeSteps([
+      {
+        type: "training",
+        targetType: "time",
+        durationSeconds: 300,
+        intensityMode: "percent_ftp",
+        percentLow: 56,
+        percentHigh: 75,
+        intensityLow: 148,
+        intensityHigh: 190,
+      },
+    ]);
+    expect(steps[0].intensityType).toBe(9);
+    expect(steps[0].isIntensityPercent).toBe(true);
+    expect(steps[0].intensityCustom).toBe(2);
+    expect(steps[0].intensityPercent).toBe(56000);
+    expect(steps[0].intensityPercentExtend).toBe(75000);
+    expect(steps[0].intensityValue).toBe(148);
+    expect(steps[0].intensityValueExtend).toBe(190);
+  });
+
+  it("encodes power as absolute watts", () => {
+    const steps = resolveBikeSteps([
+      {
+        type: "training",
+        targetType: "time",
+        durationSeconds: 300,
+        intensityMode: "power",
+        intensityLow: 200,
+        intensityHigh: 320,
+      },
+    ]);
+    expect(steps[0].intensityType).toBe(6);
+    expect(steps[0].isIntensityPercent).toBe(false);
+    expect(steps[0].intensityValue).toBe(200);
+    expect(steps[0].intensityValueExtend).toBe(320);
+  });
+
+  it("encodes speed in km/h scaled by 100", () => {
+    const steps = resolveBikeSteps([
+      {
+        type: "training",
+        targetType: "time",
+        durationSeconds: 300,
+        intensityMode: "speed",
+        intensityLow: 15,
+        intensityHigh: 20,
+      },
+    ]);
+    expect(steps[0].intensityType).toBe(4);
+    expect(steps[0].intensityValue).toBe(1500);
+    expect(steps[0].intensityValueExtend).toBe(2000);
+    expect(steps[0].intensityDisplayUnit).toBe("4");
+  });
+
+  it("encodes cadence as direct rpm", () => {
+    const steps = resolveBikeSteps([
+      {
+        type: "training",
+        targetType: "time",
+        durationSeconds: 300,
+        intensityMode: "cadence",
+        intensityLow: 70,
+        intensityHigh: 80,
+      },
+    ]);
+    expect(steps[0].intensityType).toBe(7);
+    expect(steps[0].intensityValue).toBe(70);
+    expect(steps[0].intensityValueExtend).toBe(80);
+  });
+
+  it("encodes a trainingLoad target", () => {
+    const steps = resolveBikeSteps([
+      { type: "training", targetType: "trainingLoad", trainingLoadPoints: 120 },
+    ]);
+    expect(steps[0].targetType).toBe(6);
+    expect(steps[0].targetValue).toBe(120);
+  });
+
+  it("encodes an hrRecovery target on a rest step", () => {
+    const steps = resolveBikeSteps([
+      { type: "rest", targetType: "hrRecovery", hrRecoveryBpm: 110 },
+    ]);
+    expect(steps[0].exerciseType).toBe(4); // rest = T1123
+    expect(steps[0].targetType).toBe(7);
+    expect(steps[0].targetValue).toBe(110);
   });
 });
 

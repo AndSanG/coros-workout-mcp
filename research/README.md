@@ -1,12 +1,19 @@
 # Research
 
 Reverse-engineering artifacts for the undocumented COROS Training Hub API.
-All captures were taken against the US region (`teamapi.coros.com`) in June 2026
-using the Chrome DevTools MCP against `t.coros.com`.
+Captures were taken against the US region (`teamapi.coros.com`) in June 2026 (run/strength)
+and September 2026 (bike), using the Chrome DevTools MCP against `t.coros.com`.
 
 ---
 
 ## Files
+
+### `BIKE-WORKOUT-ANALYSIS.md`
+Reference document for cycling workouts: `sportType:2`, bike-specific step codes (T4000 for
+training instead of run's T3001), and the four bike-only intensity modes not present on run:
+%FTP (`intensityType:9`), Power (`intensityType:6`, absolute watts), Speed (`intensityType:4`,
+km/h ×100), and Cadence (`intensityType:7`, rpm). Target types and the repeat-group encoding
+are identical to run.
 
 ### `RUN-WORKOUT-BUILD-SUMMARY.md`
 How `create_run_workout` was actually built, in order (reverse-engineering → payload logic →
@@ -85,3 +92,9 @@ normal development — the `update_exercises` MCP tool replaces this workflow.
 | Cadence | `intensityType:7` |
 | Repeat group | Synthetic step with `isGroup:true`, `sets:N`; children carry `groupId` |
 | Delete | `POST /training/program/delete` with body `["<id>"]` |
+| Bike sport type | `sportType: 2` |
+| Bike training step code | `T4000` (run uses `T3001`); warmup/rest/cooldown codes match run |
+| %FTP (bike only) | `intensityType:9`; carries both `%×1000` and absolute watts |
+| Power (bike only) | `intensityType:6`; absolute watts, no scaling |
+| Speed (bike only) | `intensityType:4`; km/h × 100 |
+| Cadence (bike only) | `intensityType:7`; rpm, no scaling |

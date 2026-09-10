@@ -261,6 +261,42 @@ export interface RunGroupInput {
   restSeconds?: number;
 }
 
+// --- Bike workout input types ---
+
+export type BikeIntensityMode =
+  | "heart_rate"      // direct bpm: hrType:2, isIntensityPercent:false
+  | "percent_max_hr"  // % max HR: hrType:1, isIntensityPercent:true
+  | "percent_hrr"     // % HR reserve: hrType:2, isIntensityPercent:true
+  | "percent_lthr"    // % lactate threshold HR: hrType:3, isIntensityPercent:true
+  | "percent_ftp"     // % FTP: intensityType:9, isIntensityPercent:true
+  | "power"           // intensityType:6 (watts)
+  | "speed"           // intensityType:4 (km/h)
+  | "cadence"         // intensityType:7 (rpm)
+  | "none";
+
+export interface BikeStepInput {
+  type: "warmup" | "training" | "rest" | "cooldown";
+  targetType?: "time" | "distance" | "open" | "trainingLoad" | "hrRecovery";
+  durationSeconds?: number;
+  distanceKm?: number;
+  trainingLoadPoints?: number; // targetType="trainingLoad": TL points (e.g. 100)
+  hrRecoveryBpm?: number; // targetType="hrRecovery": bpm threshold (rest steps only)
+  intensityMode?: BikeIntensityMode;
+  bpmLow?: number;
+  bpmHigh?: number;
+  percentLow?: number;
+  percentHigh?: number;
+  intensityLow?: number; // power (W), speed (km/h), or cadence (rpm) lower bound
+  intensityHigh?: number;
+  restSeconds?: number;
+}
+
+export interface BikeGroupInput {
+  repeat: number;
+  steps: BikeStepInput[];
+  restSeconds?: number;
+}
+
 // Raw exercise as returned by the COROS /training/exercise/query API
 export interface RawExercise {
   access: number;

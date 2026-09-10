@@ -25,8 +25,11 @@ stubs the `plan*` response shape.
 | `search_exercises` | Search the local strength exercise catalog (~383 exercises) | ✅ |
 | `create_workout` | Create a **strength** workout (sportType:4) | ✅ |
 | `create_run_workout` | Create a **running** workout (sportType:1) with HR zones, distance targets, repeat groups | ✅ |
+| `create_bike_workout` | Create a **cycling** workout (sportType:2) with HR zones, %FTP, power, speed, cadence targets, repeat groups | ✅ |
 | `update_exercises` | Refresh the exercise catalog from the COROS API | ✅ |
 | `list_workouts` | List the user's workouts | ✅ |
+| `delete_workout` | Delete a workout by ID (destructive, requires explicit confirmation) | ✅ |
+| `set_token` | Store a browser-extracted token without logging in (preserves the web session) | ✅ |
 
 ### Reverse-engineered run workout encoding
 Fully documented in `research/RUN-WORKOUT-HR-ANALYSIS.md`. Confirmed working:
@@ -35,6 +38,17 @@ Fully documented in `research/RUN-WORKOUT-HR-ANALYSIS.md`. Confirmed working:
 - Intensity: pace, power, cadence
 - Repeat groups: synthetic `isGroup:true` step + children with `groupId`
 - Warmup / Training / Rest / Cooldown with correct exerciseType codes and originIds
+
+### Reverse-engineered bike workout encoding
+Fully documented in `research/BIKE-WORKOUT-ANALYSIS.md`. Shares run's step/target framework
+(`exerciseType` codes, `targetType` codes, repeat-group encoding) with `sportType:2` and a
+bike-specific training step code (`T4000`). Confirmed working:
+- HR zones: %MaxHR, %HRR, %LTHR, direct bpm (identical encoding to run)
+- Bike-only intensity modes: %FTP (`intensityType:9`, carries both percent and watts), Power
+  (`6`, absolute watts), Speed (`4`, km/h ×100), Cadence (`7`, rpm)
+- Targets: time, distance (centimetres), open, training load, HR recovery (rest steps only)
+- Live-validated via a direct `/calculate` call (3× repeat group, no save) — real non-NaN
+  duration/sets/trainingLoad/distance, `exerciseBarChart` correctly expanded the repeat 3×
 
 ---
 

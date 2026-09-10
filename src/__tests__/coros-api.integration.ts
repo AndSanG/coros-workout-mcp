@@ -6,6 +6,9 @@ import {
   resolveRunSteps,
   calculateRunWorkout,
   addRunWorkout,
+  resolveBikeSteps,
+  calculateBikeWorkout,
+  addBikeWorkout,
   queryWorkouts,
   deleteWorkout,
   formatWorkoutSummary,
@@ -14,7 +17,7 @@ import {
   buildCatalogFromRaw,
 } from "../coros-api.js";
 import type { WorkoutSummary } from "../coros-api.js";
-import type { AuthData, RunStepInput, RunGroupInput } from "../types.js";
+import type { AuthData, RunStepInput, RunGroupInput, BikeStepInput, BikeGroupInput } from "../types.js";
 
 /**
  * LIVE integration test — hits the real COROS Training Hub API.
@@ -60,6 +63,7 @@ const list = async (sportType: number, limit = 20): Promise<Workout[]> => {
 };
 const listStrength = (limit = 20) => list(4, limit);
 const listRun = (limit = 20) => list(1, limit);
+const listBike = (limit = 20) => list(2, limit);
 
 describe.skipIf(!hasCreds)("coros-api integration (live API)", () => {
   // Shared across the ordered steps below; vitest runs tests in a file sequentially.
@@ -193,6 +197,89 @@ describe.skipIf(!hasCreds)("coros-api integration — run path (live API)", () =
     expect(createdId).toBeTruthy();
     await deleteWorkout(auth, createdId!);
     const stillThere = (await listRun()).find((w) => w.id === createdId);
+    expect(stillThere).toBeUndefined();
+    createdId = undefined;
+  });
+});
+
+describe.skipIf(!hasCreds)("coros-api integration — bike path (live API)", () => {
+  const BIKE_NAME = `MCP INTEGRATION BIKE — delete me ${Date.now()}`;
+  let createdId: string | undefined;
+
+  // Exercises the fragile bike-only surface: warmup + a repeat×3 group of
+  // [2 km @ %FTP (dual percent+watts encoding), 60 s rest @ cadence] + cooldown.
+  const steps: Array<BikeStepInput | BikeGroupInput> = [
+    { type: "warmup", targetType: "open" },
+    {
+      repeat: 3,
+      restSeconds: 60,
+      steps: [
+        {
+          type: "training",
+          targetType: "distance",
+          distanceKm: 2,
+          intensityMode: "percent_ftp",
+          percentLow: 76,
+          percentHigh: 90,
+          intensityLow: 179,
+          intensityHigh: 212,
+        },
+        {
+          type: "rest",
+          targetType: "time",
+          durationSeconds: 60,
+          intensityMode: "cadence",
+          intensityLow: 60,
+          intensityHigh: 70,
+        },
+      ],
+    },
+    { type: "cooldown", targetType: "open" },
+  ];
+
+  afterAll(async () => {
+    if (createdId) {
+      try {
+        await deleteWorkout(auth, createdId);
+      } catch {
+        /* already gone */
+      }
+    }
+  });
+
+  it("calculates a bike workout with real (non-NaN) plan* metrics and distance", async () => {
+    const bikeSteps = resolveBikeSteps(steps);
+    const calc = await calculateBikeWorkout(auth, BIKE_NAME, "integration", bikeSteps);
+    // plan*-key regression guard for the bike path.
+    expect(Number.isNaN(calc.duration)).toBe(false);
+    expect(calc.totalSets).toBeGreaterThan(0);
+    // 3 × 2 km of distance targets → the server should report > 0 planDistance.
+    expect(parseFloat(calc.distance)).toBeGreaterThan(0);
+  });
+
+  it("creates the bike workout and finds it in the list by id", async () => {
+    const bikeSteps = resolveBikeSteps(steps);
+    const calc = await calculateBikeWorkout(auth, BIKE_NAME, "integration", bikeSteps);
+    const addResp = (await addBikeWorkout(
+      auth,
+      BIKE_NAME,
+      "integration",
+      bikeSteps,
+      calc
+    )) as { result: string; data: string };
+    expect(addResp.result).toBe("0000");
+    createdId = addResp.data;
+    expect(createdId).toBeTruthy();
+
+    const found = (await listBike()).find((w) => w.id === createdId);
+    expect(found).toBeDefined();
+    expect(found!.name).toBe(BIKE_NAME);
+  });
+
+  it("deletes the bike workout and it disappears from the list", async () => {
+    expect(createdId).toBeTruthy();
+    await deleteWorkout(auth, createdId!);
+    const stillThere = (await listBike()).find((w) => w.id === createdId);
     expect(stillThere).toBeUndefined();
     createdId = undefined;
   });
